@@ -8,6 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square)]()
+[![GUI](https://img.shields.io/badge/GUI-Megaploit--GUI-purple?style=flat-square)](https://github.com/megaploit-community/Megaploit-GUI)
 
 </div>
 
