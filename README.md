@@ -1,6 +1,6 @@
 # megaploit-community / playbooks
 
-Community engagement playbooks for the [Megaploit C2](https://github.com/your-org/megaploit) framework.
+Community engagement playbooks for the [Megaploit C2](https://github.com/Josefifir/Megaploit) framework.
 
 Playbooks are plain `.rc` files — one Megaploit console command per line.  
 Install them with a single command from the Megaploit console:
