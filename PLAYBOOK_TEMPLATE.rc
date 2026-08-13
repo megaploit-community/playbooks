@@ -1,0 +1,57 @@
+# ===========================================================================
+# Megaploit Community Playbook
+# ===========================================================================
+# Name        : your-playbook-name        (kebab-case, matches catalog entry)
+# Version     : 1.0
+# Author      : Josefifir
+# Tested on   : Windows 10 21H2 / Ubuntu 22.04 / Amazon Linux 2  (be specific)
+# Description : One paragraph describing what this playbook does, when to use
+#               it, and what outcome the operator achieves.
+#
+# MITRE ATT&CK
+# ------------
+# T####.### Tactic: Technique Name
+# T####.### Tactic: Technique Name
+# (add one line per technique covered — see attack.mitre.org)
+#
+# Variables
+# ---------
+#   ${SESSION}   — target session ID
+#   ${LHOST}     — C2 listener IP
+#   ${MY_VAR}    — describe every variable used in this playbook
+#
+# Usage
+# -----
+#   community install playbook your-playbook-name
+#   resource community/playbooks/your-playbook-name.rc
+#
+# Phases
+# ------
+#   1  Phase 1 name
+#   2  Phase 2 name
+#   3  Phase 3 name
+#
+# Notes / Prerequisites
+# ---------------------
+#   - Any requirements the operator must satisfy before running
+#   - e.g. "Requires SYSTEM-level session"
+#   - e.g. "Requires aws CLI installed on the compromised host"
+# ===========================================================================
+
+session ${SESSION}
+
+# ── Phase 1: Phase Name ─────────────────────────────────────────────────────
+# T####.### — Technique name
+# Explain what this phase does in one line
+shell whoami
+
+# ── Phase 2: Phase Name ─────────────────────────────────────────────────────
+# T####.### — Technique name
+shell hostname
+
+# ── Phase 3: Phase Name ─────────────────────────────────────────────────────
+# T####.### — Technique name
+# ...
+
+# ── Report ───────────────────────────────────────────────────────────────────
+loot list
